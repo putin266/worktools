@@ -3,10 +3,11 @@ package edu.tongji.putin;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
-import com.sun.org.apache.bcel.internal.generic.NEW;
 
 public class cssToolCombine {
 
@@ -33,7 +34,7 @@ public class cssToolCombine {
 	private static class Tool {
 		// application scope
 		private static ArrayList<CssBlock> cssBlocksInFile = new ArrayList<cssToolCombine.CssBlock>();
-		private static Map<String, CssBlock> cssBlocksInFileMap = new HashMap<String, cssToolCombine.CssBlock>();
+		private static Set<String> cssBlocksNamesInFile = new HashSet<String>();
 		private static StringBuffer cssSb = null;
 		private static File cssgen = new File("D:/html/gen_webpro.css");
 		private static Reader reader = null;
@@ -44,11 +45,11 @@ public class cssToolCombine {
 		private static ArrayList<CssBlock> cssBlocks = null;
 		private static ArrayList<Label> contentlabels = null;
 		private static String dirname = "";
+		private static ArrayList<Combination> combs = null;
 		// file scope
 		private static File pfile = null;
 		private static StringBuffer content = null;
 		private static String prefix = null;
-		private static String contentStr = null;
 
 		public static void initlist() {
 			pfiles = new ArrayList<File>();
@@ -56,6 +57,7 @@ public class cssToolCombine {
 			cssBlocks = new ArrayList<cssToolCombine.CssBlock>();
 			contentlabels = new ArrayList<cssToolCombine.Label>();
 			dirname = "";
+			combs = new ArrayList<cssToolCombine.Combination>();
 			cssSb = new StringBuffer();
 		}
 
@@ -64,7 +66,6 @@ public class cssToolCombine {
 			if (pfile.canRead()) {
 				prefix = pfile.getName().split("\\.")[0];
 				content = new StringBuffer();
-				contentStr = null;
 			} else {
 				System.out.println("can not read" + pfile.getName());
 			}
@@ -75,7 +76,7 @@ public class cssToolCombine {
 		private static void process(File dir) {
 			readprocess(dir);
 			middleprocess();
-			// writeprocess();
+			writeprocess();
 		}
 
 		private static void readCss() {
@@ -121,7 +122,7 @@ public class cssToolCombine {
 					System.out.println("error1 in read css file");
 				}
 				cssBlocksInFile.add(css);
-				cssBlocksInFileMap.put(css.getClassname(), css);
+				cssBlocksNamesInFile.add(css.getClassname());
 				start = end + 1;
 			}
 		}
@@ -143,7 +144,7 @@ public class cssToolCombine {
 				for (int i = 0; i < pfiles.size(); i++) {
 					init(pfiles.get(i));
 					readFile();
-					pulloutCss();
+					pulloutLabel();
 				}
 			} else {
 				System.out.println("not dir");
@@ -151,15 +152,66 @@ public class cssToolCombine {
 		}
 
 		private static void middleprocess() {
-			// formatLable();
-			// combineCssBlocks();
-			// gennewClass();
-			// addclassnames();
 			combineClassNames();
+			combineCombinations();
+			combineCssBlocks();
+		}
+
+		private static void combineCombinations() {
+			Combination comb = null;
+			int newclasscount = 1;
+			for (int i = 0; i < combs.size(); i++) {
+				comb = combs.get(i);
+				comb.addlabelpids((combs.get(i).getLabelpids()));
+				comb.setNewclassname(dirname + "_" + newclasscount);
+				for (int j = 1; i + j < combs.size(); j++) {
+					if (comb.equal(combs.get(i + j))) {
+						comb.addlabelpids((combs.get(i + j).getLabelpids()));
+						comb.setNewclassname(dirname + "_" + newclasscount);
+						combs.remove(i + j);
+						j--;
+					}
+				}
+				newclasscount++;
+			}
 		}
 
 		private static void combineClassNames() {
 			// TODO Auto-generated method stub
+			int classnamecount = 0;
+			for (Label label : contentlabels) {
+				for (Attr attr : label.getAttributes()) {
+					if (attr.getName().toLowerCase().equals("class")) {
+						if (attr.getValues().size() > 1) {
+							classnamecount = 0;
+							for (String str : attr.getValues()) {
+								if (cssBlocksNamesInFile.contains(str)) {
+									classnamecount++;
+								}
+							}
+							if (classnamecount > 1) {
+								CssBlock css = null;
+								Combination comb = new Combination();
+								comb.addlabelpid(label.getPid());
+								for (int i = 0; i < attr.getValues().size(); i++) {
+									String str = attr.getValues().get(i);
+									if (cssBlocksNamesInFile.contains(str)) {
+										for (CssBlock temp : cssBlocksInFile) {
+											if (temp.getClassname().equals(str)) {
+												comb.addClassname(str);
+												attr.getValues().remove(i--);
+												break;
+											}
+										}
+									}
+								}
+								combs.add(comb);
+							}
+						}
+						break;
+					}
+				}
+			}
 
 		}
 
@@ -214,58 +266,41 @@ public class cssToolCombine {
 			writecssfile();
 		}
 
-		private static void gennewClass() {
-			int count = 1;
-			boolean flag = false;
-			boolean hastd = false;
-			for (CssBlock css : cssBlocks) {
-				String classname = dirname + count;
-				hastd = false;
-				for (String selector : css.getSelector()) {
-					String id = selector.split("#")[1];// wrong! when table#xxx
-														// td
-					if (id.trim().contains(" ")) {
-						id = id.split(" ")[0];
-						hastd = true;
-					}
-					for (Label label : contentlabels) {
-						if (label.getId().equals(id)) {
-							flag = false;
-							for (Attr attr : label.getAttributes()) {
-								if (attr.name.equals("class")) {
-									attr.setValue(attr.getValue() + " "
-											+ classname);
-									flag = true;
-									break;
-								}
+		private static void combineCssBlocks() {
+			CssBlock css = new CssBlock();
+			CssBlock newcss = new CssBlock();
+			CssBlock newcsspadding = new CssBlock();
+			for (Combination comb : combs) {
+				css = new CssBlock();
+				newcss = new CssBlock();
+				newcsspadding = null;
+				for (String str : comb.getClassnames()) {
+					for (CssBlock temp : cssBlocksInFile) {
+						if (temp.getClassname().equals(str)) {
+							css = temp;
+							String selector = css.getSelector().get(0);
+							if (selector.contains(" td")) {
+								newcsspadding = new CssBlock();
+								newcsspadding.setClassname(comb
+										.getNewclassname());
+								newcsspadding.addOneSelector("."
+										+ comb.getNewclassname() + " td");
+								newcsspadding.addAttrs(css.getAttributes());
+								continue;
 							}
-							if (!flag) {
-								label.addAttr(new Attr("class", classname));
-							}
+							newcss.setClassname(comb.getNewclassname());
+							newcss.setClassSelector("."
+									+ comb.getNewclassname());
+							newcss.addAttrs(css.getAttributes());
 							break;
 						}
 					}
-				}
-				if (hastd) {
-					css.setClassSelector("." + classname + " td");
-				} else {
-					css.setClassSelector("." + classname);
-				}
-				count++;
-			}
-		}
 
-		private static void combineCssBlocks() {
-			CssBlock css = null;
-			for (int i = 0; i < cssBlocks.size(); i++) {
-				css = cssBlocks.get(i);
-				for (int j = 1; i + j < cssBlocks.size(); j++) {
-					if (css.equalsAttr(cssBlocks.get(i + j))) {
-						css.addSelector(cssBlocks.get(i + j).getSelector());
-						cssBlocks.remove(i + j);
-						j--;
-					}
 				}
+				if (newcsspadding != null) {
+					cssBlocks.add(newcsspadding);
+				}
+				cssBlocks.add(newcss);
 			}
 		}
 
@@ -281,93 +316,12 @@ public class cssToolCombine {
 				System.out.println(e.getMessage());
 				System.out.println("error when reading html files");
 			}
-			contentStr = content.toString();
 		}
 
-		private static void pulloutCss() {
-
+		private static void pulloutLabel() {
 			createLabels(content, "<table");
 			createLabels(content, "<td");
 			myfiles.add(new MyFile(pfile, content.toString()));
-		}
-
-		private static void formatLable() {
-			CssBlock css = null;
-			boolean addPadding = false;
-			String padding = null;
-			for (int i = 0; i < contentlabels.size(); i++) {
-				css = new CssBlock();
-				Label label = contentlabels.get(i);
-				css.addOneSelector(label.getName().toLowerCase() + "#"
-						+ label.getPid().substring(1));
-
-				int attrsize = label.getAttributes().size();
-				for (int j = 0; j < attrsize; j++) {
-					Attr attr = label.getAttributes().get(j);
-					if (attr.getName().toLowerCase().equals("width")) {
-						if (!attr.getValue().contains("%")
-								&& !attr.getValue().contains("px")
-								&& !attr.getValue().contains("em")) {
-							attr.setValue(attr.getValue().trim().concat("px"));
-						}
-						css.addAttr("width", attr.getValue());
-					} else if (attr.getName().toLowerCase().equals("align")) {
-						css.addAttr("text-align", attr.getValue().toLowerCase());
-					} else if (attr.getName().toLowerCase().equals("valign")) {
-						css.addAttr("vertical-align", attr.getValue()
-								.toLowerCase());
-					} else if (attr.getName().toLowerCase().equals("border")) {
-						if (!attr.getValue().contains("%")
-								&& !attr.getValue().contains("px")
-								&& !attr.getValue().contains("em")) {
-							attr.setValue(attr.getValue().trim().concat("px"));
-						}
-						css.addAttr("border", attr.getValue());
-					} else if (attr.getName().toLowerCase()
-							.equals("cellpadding")) {
-						addPadding = true;
-						padding = attr.getValue();
-					} else if (attr.getName().toLowerCase()
-							.equals("cellspacing")) {
-						if (!attr.getValue().contains("%")
-								&& !attr.getValue().contains("px")
-								&& !attr.getValue().contains("em")) {
-							attr.setValue(attr.getValue().trim().concat("px"));
-						}
-						css.addAttr("border-spacing", attr.getValue());
-						css.addAttr("border-collapse", "collapse");
-					} else if (attr.getName().toLowerCase().equals("style")) {
-						if (attr.getValue().indexOf(";") == -1) {
-							attr.setValue(attr.getValue() + ";");
-						}
-						for (String str : attr.getValue().split(";")) {
-							css.addAttr(str.split(":")[0].toLowerCase(),
-									str.split(":")[1].toLowerCase());
-						}
-					} else if (attr.getName().toLowerCase().equals("nowrap")) {
-						css.addAttr("white-space", "nowrap");
-					} else if (attr.getName().toLowerCase().equals("bgcolor")) {
-						css.addAttr("background-color", attr.getValue());
-					}
-				}
-
-				cssBlocks.add(css);
-
-				CssBlock csspadding = new CssBlock();
-
-				if (addPadding) {
-					if (!padding.contains("%") && !padding.contains("px")
-							&& !padding.contains("em")) {
-						padding = padding.trim().concat("px");
-					}
-					csspadding.addOneSelector(label.getName() + "#"
-							+ label.getId() + " td");
-					csspadding.addAttr("padding", padding);
-					cssBlocks.add(csspadding);
-					addPadding = false;
-				}
-			}
-
 		}
 
 		private static void writepfiles() {
@@ -389,26 +343,9 @@ public class cssToolCombine {
 		private static void writecssfile() {
 			try {
 				writer = new OutputStreamWriter(new FileOutputStream(new File(
-						"D:/html/pcss.css")));
-				for (CssBlock css : cssBlocksInFile) {
-					boolean flag = false;
-					for (int i = 0; i < css.getSelector().size(); i++) {
-						String str = css.getSelector().get(i);
-						if (str.contains(" td")) {
-							css.getSelector().remove(i);
-							flag = true;
-							break;
-						}
-					}
-					String temp = "";
-					if (flag) {
-						temp = "." + css.getClassname() + ",\n."
-								+ css.getClassname() + " td";
-					} else {
-						temp = "." + css.getClassname();
-					}
-
-					writer.append(temp + "{\n");
+						"D:/html/pcss.css"),true));
+				for (CssBlock css : cssBlocks) {
+					writer.append(css.getSelectorString() + "{\n");
 					for (Entry<String, String> attr : css.getAttributes()
 							.entrySet()) {
 						writer.append(attr.getKey() + ":" + attr.getValue()
@@ -432,10 +369,21 @@ public class cssToolCombine {
 				Label label = contentlabels.get(i);
 				replaceStr = "<" + label.getName();
 				String ec = label.getEscapechar();
-				replaceStr = replaceStr
-						.concat(" id=" + ec + label.getId() + ec);
+				if (!label.getId().isEmpty()) {
+					replaceStr = replaceStr.concat(" id=" + ec + label.getId()
+							+ ec);
+				}
 				for (int j = 0; j < label.getAttributes().size(); j++) {
 					Attr tempattr = label.getAttributes().get(j);
+					if(tempattr.getName().toLowerCase().equals("class")){
+						for(Combination comb : combs){
+							for(String lpid : comb.getLabelpids()){
+								if(lpid.equals(label.getPid())){
+									tempattr.setValue(tempattr.getValue() + " " + comb.getNewclassname());									
+								}
+							}
+						}
+					}
 					replaceStr = replaceStr.concat(" " + tempattr.getName()
 							+ "=" + ec + tempattr.getValue() + ec);
 				}
@@ -528,6 +476,12 @@ public class cssToolCombine {
 			attributes.put(name, value);
 		}
 
+		public void addAttrs(Map<String, String> attributes) {
+			for (Entry<String, String> entry : attributes.entrySet()) {
+				this.attributes.put(entry.getKey(), entry.getValue());
+			}
+		}
+
 		public String getSelectorString() {
 			String str = "";
 			String temp = null;
@@ -584,6 +538,14 @@ public class cssToolCombine {
 			return classname;
 		}
 
+		public void resetClassName(String newclassname) {
+			this.classname = newclassname;
+			String str = "";
+			for (int i = 0; i < selector.size(); i++) {
+				str = selector.get(i).replace(classname, newclassname);
+				selector.set(i, str);
+			}
+		}
 	}
 
 	private static class Label {
@@ -676,30 +638,31 @@ public class cssToolCombine {
 					}
 				}
 				rawvalue = str.substring(start + 1 + escapechar.length(), end);
-				value = rawvalue.substring(0, rawvalue.lastIndexOf(escapechar)).trim();
+				value = rawvalue.substring(0, rawvalue.lastIndexOf(escapechar))
+						.trim();
 				offset = rawvalue.length() - 1
 						- rawvalue.lastIndexOf(escapechar)
 						- escapechar.length();
 				start = end - offset;
 				if (name.toLowerCase().equals("id")) {
 					this.setId(value);
-				}
-				else if (name.toLowerCase().equals("class")) {
-					if(!value.contains(" ")){
+				} else if (name.toLowerCase().equals("class")) {
+					if (!value.contains(" ")) {
 						addAttr(new Attr(name, value));
-					}else if(!value.contains("\"") && !value.contains("\'") && !value.contains("`")){
+					} else if (!value.contains("\"") && !value.contains("\'")
+							&& !value.contains("`")) {
 						ArrayList<String> alvalue = new ArrayList<String>();
-						for(String tempstr : value.split(" ")){
+						for (String tempstr : value.split(" ")) {
 							alvalue.add(tempstr);
 						}
-						addAttr(new Attr(name,alvalue));
-					}else{
-						if(value.contains("\"")){
-							genClassValue(value,"\"");
-						}else if(value.contains("\'")){
-							genClassValue(value,"\'");
-						}else{
-							genClassValue(value,"`");
+						addAttr(new Attr(name, alvalue));
+					} else {
+						if (value.contains("\"")) {
+							genClassValue(name, value, "\"");
+						} else if (value.contains("\'")) {
+							genClassValue(name, value, "\'");
+						} else {
+							genClassValue(name, value, "`");
 						}
 					}
 				} else {
@@ -707,8 +670,8 @@ public class cssToolCombine {
 				}
 			}
 		}
-		
-		private void genClassValue(String value,String es){
+
+		private void genClassValue(String name, String value, String es) {
 			int cstart = 0;
 			int cend = 0;
 			ArrayList<String> values = new ArrayList<String>();
@@ -718,12 +681,12 @@ public class cssToolCombine {
 			cend = valuesb.lastIndexOf(es);
 			values.add(valuesb.substring(cstart, cend + 1));
 			valuesb.replace(cstart, cend + 1, "");
-			for(String tempstr : valuesb.toString().split(" ")){
-				if(!tempstr.isEmpty()){
-					values.add(tempstr);									
+			for (String tempstr : valuesb.toString().split(" ")) {
+				if (!tempstr.isEmpty()) {
+					values.add(tempstr);
 				}
 			}
-			addAttr(new Attr(name,values));
+			addAttr(new Attr(name, values));
 		}
 
 		public void addAttr(Attr attr) {
@@ -768,7 +731,7 @@ public class cssToolCombine {
 			this.values.clear();
 			this.values.add(value);
 		}
-		
+
 		public Attr(String name, ArrayList<String> values) {
 			this.name = name;
 			this.values = values;
@@ -786,6 +749,10 @@ public class cssToolCombine {
 			return temp.trim();
 		}
 
+		public ArrayList<String> getValues() {
+			return values;
+		}
+
 		public void setValue(String value) {
 			this.values.clear();
 			this.values.add(value);
@@ -797,6 +764,62 @@ public class cssToolCombine {
 
 		public void addValue(String value) {
 			this.values.add(value);
+		}
+	}
+
+	private static class Combination {
+		private ArrayList<String> classnames = new ArrayList<String>();
+		private Set<String> labelpids = new HashSet<String>();
+		private String newclassname = "";
+
+		public void addClassname(String classname) {
+			this.classnames.add(classname);
+		}
+
+		public void addlabelpid(String labelpid) {
+			this.labelpids.add(labelpid);
+		}
+
+		public void addlabelpids(Set<String> labelpids) {
+			this.labelpids.addAll(labelpids);
+		}
+
+		public Set<String> getLabelpids() {
+			return labelpids;
+		}
+
+		public void setLabelpids(Set<String> labelpids) {
+			this.labelpids = labelpids;
+		}
+
+		public boolean equal(Combination comb) {
+			for (String name : comb.getClassnames()) {
+				if (!this.classnames.contains(name)) {
+					return false;
+				}
+			}
+			for (String name : this.getClassnames()) {
+				if (!comb.getClassnames().contains(name)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		public ArrayList<String> getClassnames() {
+			return classnames;
+		}
+
+		public void setClassnames(ArrayList<String> classnames) {
+			this.classnames = classnames;
+		}
+
+		public String getNewclassname() {
+			return newclassname;
+		}
+
+		public void setNewclassname(String newclassname) {
+			this.newclassname = newclassname;
 		}
 	}
 }
