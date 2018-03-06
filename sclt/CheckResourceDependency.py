@@ -194,7 +194,7 @@ def beautify_xml(xml_name):
     f.close()
 
 
-def dump_to_xml(xml_name, business_entities):
+def dump_to_xml(xml_name, business_entities, ignore_list=list()):
     root = ET.Element("ResourceDependencies", {"xmlns:xsi":"http://www.w3.org/2001/XMLSchema-instance"})
     tree = ET.ElementTree(root)
     source_urn_names = business_entities.keys()
@@ -203,7 +203,7 @@ def dump_to_xml(xml_name, business_entities):
         for dependency_file in business_entities[source_urn_name]:
             dependency_names = dependency_file.confirmed_dependencies.keys()
             for dependency_name in dependency_names:
-                if dependency_name not in merged_dependencies.keys():
+                if dependency_name not in ignore_list and dependency_name not in merged_dependencies.keys():
                     merged_dependencies[dependency_name] = dependency_file.confirmed_dependencies[dependency_name]
         merged_dependency_names = merged_dependencies.keys()
         for merged_dependency_name in merged_dependency_names:
@@ -255,7 +255,7 @@ def list_files_recursively(base_dir, dir_suffix, entity_api_files):
 
 
 def get_namespace(suffix, interface_name):
-    return suffix.replace("/", ".") + interface_name
+    return suffix[1:].replace("/", ".") + interface_name
 
 
 def list_entity_files(module_dir):
@@ -285,17 +285,25 @@ def list_entity_files(module_dir):
 
 
 def main():
-    # configurations
+    # Notice: config your project dir
     module_dir = "/Users/daniel/Documents/projects/qad/qadmodule_repository/service/bl/trunk/"
     entity_files = list_entity_files(module_dir)
     pp.pprint(entity_files)
 
     external_file_dict = dict()
     external_file_name_list = list()
-    # TODO: maintain your util files here
+    # Notice: maintain your util files here
     external_file_name_list.append(module_dir + "/src/impl/com/qad/service/DependentServices.cls")
     external_file_name_list.append(module_dir + "/src/impl/com/qad/service/DOCache.cls")
     external_file_name_list.append(module_dir + "/src/impl/com/qad/service/ServiceUtilities.cls")
+
+    ignore_list = list()
+    # Notice: maintain the ignored dependencies
+    ignore_list.append("com.qad.base.system.IDBControl")
+    ignore_list.append("com.qad.base.domain.IDomain")
+    ignore_list.append("com.qad.qra.logging.ILogger")
+    ignore_list.append("com.qad.qra.transaction.ITransactionManager")
+    ignore_list.append("com.qad.qra.session.ISessionService")
 
     for filename in external_file_name_list:
         external_dependency = FileDependency(filename, external_file_dict)
@@ -314,5 +322,6 @@ def main():
             business_entities[resource_uri].append(file_dependency)
             print("processed", filename, "!")
 
-    dump_to_xml(module_dir + "/tmp.xml", business_entities)
+    # Notice: dump xml to tmp.xml under the project dir
+    dump_to_xml(module_dir + "/tmp.xml", business_entities, ignore_list)
 main()
